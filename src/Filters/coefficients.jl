@@ -50,8 +50,10 @@ struct PolynomialRatio{Domain,T<:Number} <: FilterCoefficients{Domain}
     b::Poly{T}
     a::Poly{T}
 
-    PolynomialRatio{D,Ti}(b::Poly, a::Poly) where {D,Ti<:Number} =
-        new{D,Ti}(convert(Poly{Ti}, b/a[end]), convert(Poly{Ti}, a/a[end]))
+    PolynomialRatio{:z,Ti}(b::Poly, a::Poly) where {Ti<:Number} =
+        new{:z,Ti}(convert(Poly{Ti}, b/a[end]), convert(Poly{Ti}, a/a[end]))
+    PolynomialRatio{:s,Ti}(b::Poly, a::Poly) where {Ti<:Number} =
+        new{:s,Ti}(convert(Poly{Ti}, b), convert(Poly{Ti}, a))
 end
 PolynomialRatio(f::FilterCoefficients{D}) where {D} = PolynomialRatio{D}(f)
 """
@@ -75,6 +77,12 @@ PolynomialRatio{D}(b::Poly, a::Poly) where {D} = PolynomialRatio{D}(promote(b, a
 
 # The DSP convention is highest power first. The Polynomials.jl
 # convention is lowest power first.
+function PolynomialRatio{:s,T}(b::Union{Number,Vector{<:Number}}, a::Union{Number,Vector{<:Number}}) where {T}
+    if all(iszero, a)
+        throw(ArgumentError("filter must have non-zero denominator"))
+    end
+    PolynomialRatio{:s,T}(Poly(reverse(b), :s), Poly(reverse(a), :s))
+end
 function PolynomialRatio{D,T}(b::Union{Number,Vector{<:Number}}, a::Union{Number,Vector{<:Number}}) where {D,T}
     if all(iszero, b) || all(iszero, a)
         throw(ArgumentError("filter must have non-zero numerator and denominator"))
@@ -98,9 +106,9 @@ PolynomialRatio{D}(f::ZeroPoleGain{D,Z,P,K}) where {D,Z,P,K} =
     PolynomialRatio{D,promote_type(real(Z),real(P),K)}(f)
 
 ZeroPoleGain{D,Z,P,K}(f::PolynomialRatio{D}) where {D,Z,P,K} =
-    ZeroPoleGain{D,Z,P,K}(roots(f.b), roots(f.a), real(f.b[end]))
-ZeroPoleGain{D}(f::PolynomialRatio{D,T}) where {D,T} =
-    ZeroPoleGain{D,complex(T),complex(T),T}(f)
+    ZeroPoleGain{D,Z,P,K}(roots(f.b), roots(f.a), real(f.b[end]/f.a[end]))
+ZeroPoleGain{D}(f::PolynomialRatio{D}) where {D} =
+    ZeroPoleGain{D}(roots(f.b), roots(f.a), f.b[end]/f.a[end])
 
 *(f::PolynomialRatio{D}, g::Number) where {D} = PolynomialRatio{D}(g*f.b, f.a)
 *(g::Number, f::PolynomialRatio{D}) where {D} = PolynomialRatio{D}(g*f.b, f.a)
@@ -187,6 +195,9 @@ function Biquad{D,T}(f::PolynomialRatio{D}) where {D,T}
     a, b = f.a, f.b
     xs = max(length(b), length(a))
 
+    if xs > 0 && !isone(a[xs-1])
+        throw(ArgumentError("leading denominator coefficient of a Biquad must be one"))
+    end
     if xs == 3
         Biquad{D,T}(b[2], b[1], b[0], a[1], a[0])
     elseif xs == 2
