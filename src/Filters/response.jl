@@ -6,7 +6,7 @@
 
 function freqz(filter::FilterCoefficients{:z}, w::Number)
     filter = convert(PolynomialRatio, filter)
-    ejw = exp(-im * w)
+    ejw = exp(im * w)
     polyval(filter.b, ejw) ./ polyval(filter.a, ejw)
 end
 
@@ -54,7 +54,7 @@ or frequencies `w` in radians/sample.
 """
 function phasez(filter::FilterCoefficients{:z}, w = range(0, stop=π, length=250))
     h = freqz(filter, w)
-    unwrap(-atan.(imag(h), real(h)); dims=ndims(h))
+    unwrap(angle.(h); dims=ndims(h))
 end
 
 
