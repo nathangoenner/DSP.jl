@@ -6,7 +6,7 @@
 
 function freqz(filter::FilterCoefficients{:z}, w::Number)
     filter = convert(PolynomialRatio, filter)
-    ejw = exp(im * w)
+    ejw = exp(-im * w)
     polyval(filter.b, ejw) ./ polyval(filter.a, ejw)
 end
 
