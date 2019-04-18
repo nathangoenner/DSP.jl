@@ -50,10 +50,22 @@ struct PolynomialRatio{Domain,T<:Number} <: FilterCoefficients{Domain}
     b::Poly{T}
     a::Poly{T}
 
-    PolynomialRatio{:z,Ti}(b::Poly, a::Poly) where {Ti<:Number} =
-        new{:z,Ti}(convert(Poly{Ti}, b/a[0]), convert(Poly{Ti}, a/a[0]))
-    PolynomialRatio{:s,Ti}(b::Poly, a::Poly) where {Ti<:Number} =
-        new{:s,Ti}(convert(Poly{Ti}, b), convert(Poly{Ti}, a))
+    function PolynomialRatio{:z,Ti}(b::Poly{Ti}, a::Poly{Ti}) where {Ti<:Number}
+        if !isone(a[0])
+            if iszero(a[0])
+                throw(ArgumentError("filter must have non-zero leading denominator coefficient"))
+            end
+            b = convert(Poly{Ti}, b / a[0])
+            a = convert(Poly{Ti}, a / a[0])
+        end
+        return new{:z,Ti}(b, a)
+    end
+    function PolynomialRatio{:s,Ti}(b::Poly{Ti}, a::Poly{Ti}) where {Ti<:Number}
+        if iszero(a)
+            throw(ArgumentError("filter must have non-zero denominator"))
+        end
+        return new{:s,Ti}(b, a)
+    end
 end
 PolynomialRatio(f::FilterCoefficients{D}) where {D} = PolynomialRatio{D}(f)
 """
@@ -72,27 +84,29 @@ H(z) = \\frac{\\verb!b[1]! + \\ldots + \\verb!b[n]! z^{-n+1}}{\\verb!a[1]! + \\l
 vectors ordered from highest power to lowest.
 """
 PolynomialRatio(b, a) = PolynomialRatio{:z}(b, a)
-PolynomialRatio{D}(b::Poly{T}, a::Poly{T}) where {D,T<:Number} = PolynomialRatio{D,T}(b, a)
-PolynomialRatio{D}(b::Poly, a::Poly) where {D} = PolynomialRatio{D}(promote(b, a)...)
+_maybe_normalize(::Val, b, a) = promote(b, a)
+function _maybe_normalize(::Val{:z}, b, a)
+    if iszero(a[0])
+        throw(ArgumentError("filter must have non-zero leading denominator coefficient"))
+    end
+    return promote(b / a[0], a / a[0])
+end
+function PolynomialRatio{D}(b::Poly, a::Poly) where {D}
+    b, a = _maybe_normalize(Val(D), b, a)
+    return PolynomialRatio{D,eltype(a)}(b, a)
+end
 
-# The DSP convention is highest power first. The Polynomials.jl
+# The DSP convention for Laplace domain is highest power first. The Polynomials.jl
 # convention is lowest power first.
-function PolynomialRatio{:s,T}(b::Union{Number,Vector{<:Number}}, a::Union{Number,Vector{<:Number}}) where {T}
-    if all(iszero, a)
-        throw(ArgumentError("filter must have non-zero denominator"))
-    end
-    PolynomialRatio{:s,T}(Poly(reverse(b), :s), Poly(reverse(a), :s))
-end
-function PolynomialRatio{:z,T}(b::Union{Number,Vector{<:Number}}, a::Union{Number,Vector{<:Number}}) where {T}
-    if all(iszero, a)
-        throw(ArgumentError("filter must have non-zero denominator"))
-    end
-    return PolynomialRatio{:z,T}(Poly(b, "z^-1"), Poly(a, "z^-1"))
-end
-PolynomialRatio{D}(b::Union{T,Vector{T}}, a::Union{S,Vector{S}}) where {D,T<:Number,S<:Number} =
-    PolynomialRatio{D,promote_type(T,S)}(b, a)
+_polyprep(D::Symbol, x) = D === :z ? x : reverse(x)
+_polyvar(D::Symbol) = D === :z ? Symbol("z^-1") : D
+PolynomialRatio{D,T}(b::Union{Number,Vector{<:Number}}, a::Union{Number,Vector{<:Number}}) where {D,T} =
+    PolynomialRatio{D,T}(Poly{T}(_polyprep(D, b), _polyvar(D)), Poly{T}(_polyprep(D, a), _polyvar(D)))
+PolynomialRatio{D}(b::Union{Number,Vector{<:Number}}, a::Union{Number,Vector{<:Number}}) where {D} =
+    PolynomialRatio{D}(Poly(_polyprep(D, b), _polyvar(D)), Poly(_polyprep(D, a), _polyvar(D)))
 
-PolynomialRatio{D,T}(f::PolynomialRatio{D}) where {D,T} = PolynomialRatio{D,T}(f.b, f.a)
+PolynomialRatio{D,T}(f::PolynomialRatio{D}) where {D,T} =
+    PolynomialRatio{D,T}(convert(Poly{T}, f.b), convert(Poly{T}, f.a))
 PolynomialRatio{D}(f::PolynomialRatio{D,T}) where {D,T} = PolynomialRatio{D,T}(f)
 
 Base.promote_rule(::Type{PolynomialRatio{D,T}}, ::Type{PolynomialRatio{D,S}}) where {D,T,S} = PolynomialRatio{D,promote_type(T,S)}
@@ -100,7 +114,7 @@ Base.promote_rule(::Type{PolynomialRatio{D,T}}, ::Type{PolynomialRatio{D,S}}) wh
 function PolynomialRatio{:s,T}(f::ZeroPoleGain{:s}) where {T<:Real}
     b = f.k*poly(f.z)
     a = poly(f.p)
-    return PolynomialRatio{:s,T}(Poly(real(b.a)), Poly(real(a.a)))
+    return PolynomialRatio{:s,T}(Poly{T}(real(b.a), :s), Poly{T}(real(a.a), :s))
 end
 function PolynomialRatio{:z,T}(f::ZeroPoleGain{:z}) where {T<:Real}
     b = real(f.k*poly(f.z).a)
@@ -110,7 +124,7 @@ function PolynomialRatio{:z,T}(f::ZeroPoleGain{:z}) where {T<:Real}
     elseif length(b) < length(a)
         b = [b; zeros(eltype(b), length(a)-length(b))]
     end
-    return PolynomialRatio{:z,T}(Poly(reverse(b)), Poly(reverse(a)))
+    return PolynomialRatio{:z,T}(reverse(b), reverse(a))
 end
 PolynomialRatio{D}(f::ZeroPoleGain{D,Z,P,K}) where {D,Z,P,K} =
     PolynomialRatio{D,promote_type(real(Z),real(P),K)}(f)
